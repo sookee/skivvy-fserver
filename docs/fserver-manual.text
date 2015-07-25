@@ -1,0 +1,34 @@
+manual.text
+
+ Created on: 29 Jan 2013
+     Author: SooKee oasookee@googlemail.com
+
+     
+------------------------------------------------------------
+| COMPILING:
+------------------------------------------------------------
+
+CHANOPS requires C++11 functionality. He is currently built
+using GCC 4.7 trunk but GCC 4.6 may work.
+
+------------------------------------------------------------
+| INSTALLING:
+------------------------------------------------------------
+
+------------------------------------------------------------
+| CONFIGURING:
+------------------------------------------------------------
+
+<Jewjitsu> let's say Omicr0n was beginning a takeover here...
+<SooKee> I have a "channel takeover" mode for skivvy. It reads the config file for who to target first, etc...
+<Jewjitsu> this should be the response from Skivvy
+<Jewjitsu> mode #openarenahelp -ooooo+b AIM ali3n Omicr0n pet Pixelized SmellyCat *!*@Omicr0n.users.quakenet.org
+<AIM> FREDO SANTNA
+<Jewjitsu> mode #openarenahelp -oo+imnt Zim106 Zimmermint
+<Jewjitsu> mode #openarenahelp +k [auto md5 key]
+<AIM> Skivvy +1 Jewjitsu 0
+<Skivvy> AIM: One what?
+<AIM> fight?
+<Jewjitsu> huh?
+<SaamMy-laptop> maybe SooKee and correct me if I am wrong in this my speech...maybe if I have my bot hosted with a good connection by vps, we can inurgency cases such as multiple bot attacks get quickest answer by my fast vps's bot... on kbanning all... right?
+<Jewjitsu> never kban all
