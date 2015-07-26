@@ -1,5 +1,5 @@
 # /*-----------------------------------------------------------------.
-# | Copyright (C) 2012 SooKee oasookee@googlemail.com                |
+# | Copyright (C) 2015 SooKee oasookee@googlemail.com                |
 # '------------------------------------------------------------------'
 # 
 # This program is free software; you can redistribute it and/or

@@ -1,0 +1,7 @@
+PREFIX=$HOME/dev
+
+MAKE_NCURSES=yes
+
+export ARFLAGS=cr
+export AR_FLAGS=cr
+

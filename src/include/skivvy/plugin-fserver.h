@@ -38,24 +38,24 @@ http://www.gnu.org/licenses/gpl-2.0.html
 namespace skivvy { namespace ircbot {
 
 using namespace sookee::types;
-using namespace skivvy::email;
 using namespace skivvy::utils;
 
 class FServerIrcBotPlugin
-: public BasicIrcBotPlugin
+: public ManagedIrcBotPlugin
 , public IrcBotMonitor
 {
 private:
 
 	BackupStore store;
 
+	bool files(const message& msg);
 	bool serve(const message& msg);
 
 public:
 	FServerIrcBotPlugin(IrcBot& bot);
 	virtual ~FServerIrcBotPlugin();
 
-	// Plugin API
+	// OPTIONAL INTERFACE: IrcBotPlugin
 	str_vec api(unsigned call, const str_vec& args = {}) override;
 
 	// INTERFACE: BasicIrcBotPlugin
