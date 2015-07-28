@@ -1,0 +1,10 @@
+# Created on: Jul 28, 2015
+
+
+Make a separate queue processing thread
+Add command to get specific files
+Add command to discover queue position, ETA etc..
+Bug Avoid sending zipped index in the index!
+
+
+
