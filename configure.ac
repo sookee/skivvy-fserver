@@ -24,6 +24,8 @@
 # '-----------------------------------------------------------------*/
 
 AC_INIT([skivvy-fserver],[0.1],[oaskivvy@gmail.com],[skivvy-fserver])
+AC_CONFIG_AUX_DIR([aux])
+AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR([src/plugin-fserver.cpp])
 AC_CONFIG_HEADERS([config.h])
 
@@ -34,16 +36,13 @@ AM_PROG_LIBTOOL
 
 AC_PROG_CXX
 AC_PROG_INSTALL
+AC_LANG_CPLUSPLUS
 
-AC_LANG(C++)
 AX_CXX_COMPILE_STDCXX_14([noext],[mandatory])
 
 PKG_CHECK_MODULES([SOOKEE], [libsookee])
 PKG_CHECK_MODULES([SKIVVY], [libskivvy])
 PKG_CHECK_MODULES([LIBZIP], [libzip])
 
-AC_CONFIG_MACRO_DIR([m4])
-
-AC_LANG_CPLUSPLUS
 AC_CONFIG_FILES([Makefile src/Makefile])
 AC_OUTPUT

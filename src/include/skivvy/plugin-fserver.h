@@ -42,6 +42,138 @@ using namespace sookee::net;
 using namespace sookee::types;
 using namespace skivvy::utils;
 
+const str LOGI = "I: ";
+const str LOGW = "W: ";
+const str LOGE = "E: ";
+const str LOGX = "X: ";
+
+template<typename ValueType>
+class synchronized_queue
+{
+public:
+	using queue_type = std::deque<ValueType>;
+	using vector_type = std::vector<ValueType>;
+	using size_type = typename queue_type::size_type;
+	using value_type = typename queue_type::value_type;
+
+private:
+	std::mutex mtx;
+	unique_lock lock;
+	size_type max_size = 0;
+	queue_type data;
+	std::condition_variable cv;
+	bool done = false;
+
+public:
+	synchronized_queue(size_type max_size = 0)
+	: lock(mtx)
+	, max_size(max_size)
+	, done(true)
+	{
+		lock.unlock();
+	}
+
+	synchronized_queue(synchronized_queue&& q)
+	: lock(q.mtx)
+	, max_size(q.max_size)
+	, data(std::move(q.data))
+	, done(q.done)
+	{
+		lock.unlock();
+	}
+
+	synchronized_queue(const synchronized_queue& q) = delete;
+
+//	value_type& front() { lock_guard lock(mtx); return data.front(); }
+//	value_type const& front() const { lock_guard lock(mtx); return data.front(); }
+//	value_type& back() { lock_guard lock(mtx); return data.back(); }
+//	value_type const& back() const { return data.back(); }
+
+	size_type size() { lock_guard lock(mtx); return data.size(); }
+	size_type capacity() { lock_guard lock(mtx); return max_size; }
+	size_type empty() { lock_guard lock(mtx); return data.empty(); }
+
+	vector_type get_vector()
+	{
+//		bug_func();
+		std::unique_lock<std::mutex> lock(mtx);
+		return {data.begin(), data.end()};
+	}
+
+	bool find(const value_type& v, size_type& pos)
+	{
+		bug_func();
+		bug_var(v);
+		std::unique_lock<std::mutex> lock(mtx);
+		for(pos = 0; pos < data.size(); ++pos)
+			if(data[pos] == v)
+				return true;
+		return false;
+	}
+
+	bool erase(const value_type& v)
+	{
+		bug_func();
+		bug_var(v);
+		std::unique_lock<std::mutex> lock(mtx);
+		auto found = std::find(data.begin(), data.end(), v);
+		if(found == data.end())
+			return false;
+		data.erase(found);
+		return true;
+	}
+
+	bool push_back(ValueType v)
+	{
+		bug_func();
+		bug_var(v);
+		std::unique_lock<std::mutex> lock(mtx);
+		if(max_size && data.size() >= max_size)
+			return false;
+		data.push_back(std::move(v));
+		lock.unlock();
+		cv.notify_one();
+		return true;
+	}
+
+	void open()
+	{
+		bug_func();
+		std::unique_lock<std::mutex> lock(mtx);
+		done = false;
+	}
+
+	void close()
+	{
+		bug_func();
+		std::unique_lock<std::mutex> lock(mtx);
+		done = true;
+		lock.unlock();
+		cv.notify_one();
+	}
+
+	bool active()
+	{
+		bug_func();
+		std::unique_lock<std::mutex> lock(mtx);
+		return !done;
+	}
+
+	bool pop_front(ValueType& v)
+	{
+		std::unique_lock<std::mutex> lock(mtx);
+		cv.wait(lock, [this]()
+		{	return done || !data.empty();});
+		if(data.empty())
+			return false;
+		bug_func();
+		v = std::move(data.front());
+		bug_var(v);
+		data.pop_front();
+		return true;
+	}
+};
+
 class FServerIrcBotPlugin
 : public ManagedIrcBotPlugin
 , public IrcBotMonitor
@@ -64,13 +196,51 @@ private:
 
 	struct entry
 	{
+		bool error = false;
 		str pathname;
+		str userhost;
+		message msg;
+		uint64 size = 0; // 0 -> not started
+		uint64 sent = 0; // size == sent -> done
 		std::future<void> fut;
+
+		entry() = default;
+
+		entry(entry&& e) noexcept
+		: error(false)
+		, pathname(std::move(e.pathname))
+		, userhost(std::move(e.userhost))
+		, msg(std::move(e.msg))
+		, size(e.size)
+		, sent(e.sent)
+		, fut(std::move(e.fut))
+		{
+		}
 	};
 
-	std::mutex entry_mtx;
+	std::mutex entries_mtx;
 	std::map<uint32, entry> entries;
-	std::deque<uint32> q;
+
+	uns get_userhost_entries(const str& userhost)
+	{
+		uns count = 0;
+
+		lock_guard lock (entries_mtx);
+		for(auto&& p: entries)
+			if(p.second.userhost == userhost)
+				++count;
+
+		return count;
+	}
+
+	synchronized_queue<uint32> wait_q {10};
+	synchronized_queue<uint32> send_q {2};
+//	std::deque<uint32> q;
+
+	std::atomic_bool done {false};
+	std::future<void> process_queues_fut;
+	void process_queues();
+	void erase_send_entry(uint32 fid, entry& e);
 
 	bool have_zip(const str& data_dir, const str& name); // no .ext
 	bool have_txt(const str& data_dir, const str& name); // no .ext
@@ -80,7 +250,7 @@ private:
 
 	str ntoa(uint32 ip) const;
 //	void dcc_server(const str& pathname);
-	void dcc_server(uint32 ip, uint32 port, uint32 fid);
+	void dcc_send_file_by_id(uint32 ip, uint32 port, uint32 fid);
 
 public:
 	FServerIrcBotPlugin(IrcBot& bot);

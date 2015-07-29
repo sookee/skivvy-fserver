@@ -74,77 +74,6 @@ str todays_date()
 	return y + '-' + (m.size()<2?"0":"") + m + '-' + (d.size()<2?"0":"") + d;
 }
 
-class CTCP
-{
-	bool is_l_char(char c)
-	{
-		static const str nl = "\000\012\015";
-		return nl.find(c) == str::npos;
-	}
-	const char M_QUOTE = '\020';
-	const char M_DELIM = '\001';
-	const str Q_NULL = M_QUOTE + "0";
-	const str Q_NL = M_QUOTE + "n";
-	const str Q_CR = M_QUOTE + "r";
-	const str Q_QUOTE = str() + M_QUOTE + M_QUOTE;
-
-	str m_quote(const str& s)
-	{
-		str u;
-
-		for(char c: s)
-		{
-			if(c == '\0')
-				u += Q_NULL;
-			else if(c == '\n')
-				u += Q_NL;
-			else if(c == '\r')
-				u += Q_CR;
-			else if(c == M_QUOTE)
-				u += Q_QUOTE;
-			else
-				u += c;
-		}
-
-		return u;
-	}
-
-	str un_m_quote(const str& s)
-	{
-		str u;
-
-		bool quote = false;
-		for(char c: s)
-		{
-			if(quote)
-			{
-				if(c == '0')
-					c = '\0';
-				else if(c == 'n')
-					c = '\n';
-				else if(c == 'r')
-					c = '\r';
-				else if(c != M_QUOTE)
-					log("ERROR: CTCP bad quote");
-				quote = false;
-			}
-			else if(c == M_QUOTE)
-			{
-				quote = true;
-				continue;
-			}
-
-			u += c;
-		}
-
-		return u;
-	}
-
-public:
-
-//	parse_line()
-};
-
 bool FServerIrcBotPlugin::have_txt(const str& data_dir, const str& name)
 {
 	str txtname = name + ".txt";
@@ -153,7 +82,7 @@ bool FServerIrcBotPlugin::have_txt(const str& data_dir, const str& name)
 	if(std::ifstream(txtname).is_open())
 		return true;
 
-	log("INFO: Text file not found recreating: " << txtname);
+	log("I: Text file not found recreating: " << txtname);
 
 	// create file
 	str_set exts;
@@ -215,7 +144,7 @@ bool FServerIrcBotPlugin::have_txt(const str& data_dir, const str& name)
 	if(std::ifstream(txtname).is_open())
 		return true;
 
-	log("ERROR: failed to create text index: " << txtname);
+	log("E:: failed to create text index: " << txtname);
 
 	return false;
 }
@@ -238,9 +167,9 @@ bool FServerIrcBotPlugin::have_zip(const str& data_dir, const str& name)
 	zip* zf = zip_open(zipname.c_str(), ZIP_CREATE, &error);
 	if(!zf)
 	{
-		log("ERROR: unable to create zip file: " << zipname);
-		log("     : code: " << error);
-		log("     : " << zip_strerror(zf));
+		log("E: unable to create zip file: " << zipname);
+		log(" : code: " << error);
+		log(" : " << zip_strerror(zf));
 		return false;
 	}
 
@@ -249,8 +178,8 @@ bool FServerIrcBotPlugin::have_zip(const str& data_dir, const str& name)
 
 	if(!zs)
 	{
-		log("ERROR: unable to create zip source: " << txtname);
-		log("     : " << zip_strerror(zf));
+		log("E: unable to create zip source: " << txtname);
+		log(" : " << zip_strerror(zf));
 		zip_close(zf);
 		return false;
 	}
@@ -263,8 +192,8 @@ bool FServerIrcBotPlugin::have_zip(const str& data_dir, const str& name)
 
 	if(zip_file_add(zf, txtname.c_str(), zs, ZIP_FL_OVERWRITE) == -1)
 	{
-		log("ERROR: unable to add file: " << txtname << " to " << zipname);
-		log("     : " << zip_strerror(zf));
+		log("E: unable to add file: " << txtname << " to " << zipname);
+		log(" : " << zip_strerror(zf));
 		zip_source_free(zs);
 		zip_close(zf);
 		return false;
@@ -272,8 +201,8 @@ bool FServerIrcBotPlugin::have_zip(const str& data_dir, const str& name)
 
 	if(zip_close(zf))
 	{
-		log("ERROR: unable to create zip file: " << zipname);
-		log("     : " << zip_strerror(zf));
+		log("E: unable to create zip file: " << zipname);
+		log(" : " << zip_strerror(zf));
 		return false;
 	}
 
@@ -331,160 +260,221 @@ str FServerIrcBotPlugin::ntoa(uint32 ip) const
 	return {inet_ntoa(ip_addr)};
 }
 
-void FServerIrcBotPlugin::dcc_server(uint32 ip, uint32 port, uint32 fid)
+void FServerIrcBotPlugin::erase_send_entry(uint32 fid, entry& e)
+{
+	bug_func();
+	bug_var(fid);
+
+	if(!send_q.erase(fid))
+		log("E: erasing from send queue(missing) [" << fid << "]");
+
+	if(e.fut.valid())
+	{
+		auto status = e.fut.wait_for(std::chrono::seconds(3));
+		if(status == std::future_status::ready)
+			e.fut.get();
+		else
+		{
+			log("E: waiting for transfer thread to die [" << fid << "]");
+		}
+	}
+}
+
+void FServerIrcBotPlugin::process_queues()
+{
+	while(!done.load())
+	{
+		std::this_thread::sleep_for(std::chrono::seconds(1));
+		// tidy queues
+		decltype(entries.begin()) found;
+		{
+			lock_guard lock(entries_mtx);
+
+			for(auto fid: send_q.get_vector())
+			{
+				if((found = entries.find(fid)) == entries.end())
+					continue;
+
+				entry& entry = found->second;
+
+				bug_var(fid);
+				bug_var(entry.error);
+				bug_var(entry.size);
+				bug_var(entry.sent);
+
+				if(entry.error)
+				{
+					log("I: send error: [" << fid << "] " << entry.userhost << " " << entry.pathname);
+					erase_send_entry(fid, entry);
+					entries.erase(found);
+				}
+				else if(entry.size)
+				{
+					if(entry.size == entry.sent)
+					{
+						log("I: file complete: [" << fid << "] " << entry.userhost << " " << entry.pathname);
+						erase_send_entry(fid, entry);
+						entries.erase(found);
+					}
+				}
+			}
+		}
+
+		// check send_q for spaces & fill from wait_q
+
+		decltype(wait_q)::value_type fid = 0;
+//		decltype(entries.begin()) found;
+
+		if(send_q.size() < send_q.capacity() && wait_q.pop_front(fid))
+		{
+			lock_guard lock(entries_mtx);
+			if((found = entries.find(fid)) == entries.end())
+			{
+				log("E: file id disappeared (should never happen): " << fid);
+				return;
+			}
+
+			if(!send_q.push_back(fid))
+			{
+				log("E: no space in send queue (should never happen): " << fid);
+				found->second.error = true;
+			}
+			else
+			{
+				str fname = found->second.pathname;
+				bug_var(fname);
+				str zipname = get_filename_from_pathname(fname);
+				bug_var(zipname);
+
+				auto ip = INADDR_LOOPBACK;//htonl(INADDR_LOOPBACK);//dcc_get_my_address();
+				decltype(htonl(0)) port = 0;
+
+				struct stat s;
+				if(stat(fname.c_str(), &s))
+				{
+					log("E: can not stat zip file: " << fname);
+				}
+
+				str address = "127.0.0.1";
+
+				soss oss;
+				oss << "DCC Send " << zipname << " (" << address << ")";
+				bot.fc_reply_pm_notice(found->second.msg, oss.str());
+
+				oss.str("");
+				oss << '\001';
+				oss << "DCC SEND";
+				oss << ' ' << zipname;
+				oss << ' ' << ip; // the 32bit IP number, host byte order
+				oss << ' ' << port;
+				oss << ' ' << s.st_size;
+				oss << ' ' << fid; // sequence id?
+				oss << '\001';
+				bot.fc_reply_pm(found->second.msg, oss.str());
+			}
+		}
+	}
+}
+
+void FServerIrcBotPlugin::dcc_send_file_by_id(uint32 ip, uint32 port, uint32 fid)
 {
 	bug_func();
 	bug_var(ip);
 	bug_var(port);
 	bug_var(fid);
 
-	entry e;
+	netstream ns;
+	std::ifstream ifs;
+
+	decltype(entries.begin()) found;
+
+	str userhost;
+
 	{
-		lock_guard lock(entry_mtx);
-		auto found = entries.find(fid);
-		if(found == entries.end())
+		lock_guard lock(entries_mtx);
+
+		if((found = entries.find(fid)) == entries.end())
 		{
-			log("ERROR: file id not found: " << fid);
+			log("E: file id not found: " << fid);
 			return;
 		}
-		e = std::move(found->second);
-		entries.erase(found);
+
+		userhost = found->second.userhost;
+
+		str host = ntoa(ip);
+		bug_var(host);
+		bug_var(found->first);
+		bug_var(found->second.pathname);
+		bug_var(found->second.userhost);
+
+		ns.open(host, std::to_string(port));
+
+		if(!ns)
+		{
+			log("E: opening connection to: " << host << ":" << port);
+			return;
+		}
+
+		ifs.open(found->second.pathname, std::ios::binary|std::ios::ate);
+
+		if(!ifs)
+		{
+			log("E: opening file to send: " << found->second.pathname);
+			return;
+		}
+
+		found->second.size = ifs.tellg();
+		ifs.seekg(0);
+		found->second.sent = ifs.tellg();
 	}
 
-//	sockaddr_in serv_addr;
-//
-//	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-//
-//	if(sockfd < 0)
-//	{
-//		log("ERROR: " << strerror(errno));
-//		return;
-//	}
-//
-//	bzero((char*) &serv_addr, sizeof(serv_addr));
-//
-//	serv_addr.sin_family = AF_INET;
-//	serv_addr.sin_addr.s_addr = ip;
-//	serv_addr.sin_port = htons(port);
-//
-//	if(connect(sockfd, (sockaddr*) &serv_addr, sizeof(serv_addr)) < 0)
-//	{
-//		log("ERROR: " << strerror(errno));
-//		return;
-//	}
-//
-//	int len;
+	bug_var((bool)ifs);
+	ns << ifs.rdbuf();
+	lock_guard lock(entries_mtx);
+	if((found = entries.find(fid)) == entries.end())
+	{
+		log("E: file id disappeared (should never happen): " << fid);
+		return;
+	}
+	found->second.sent = ifs.tellg();
+
+
 //	char buf[1024];
 //
-//	std::ifstream ifs(e.pathname, std::ios::binary);
-//
-//	if(!ifs)
+//	while(ifs.read(buf, sizeof(buf)) && ifs.gcount())
 //	{
-//		log("ERROR: opening file to send: " << e.pathname);
-//		return;
-//	}
-//
-//	while(ifs.read(buf, sizeof(buf) && ifs.gcount()))
-//	{
-//		if((len = write(sockfd, buf, ifs.gcount())) < 0)
+//		bug_var(ifs.gcount());
+//		if(!ns.write(buf, ifs.gcount()))
 //		{
-//			log("ERROR: " << strerror(errno));
+//			log("E: writing to client failed: " << fid);
+//			lock_guard lock(entries_mtx);
+//			if((found = entries.find(fid)) != entries.end())
+//				found->second.error = true;
 //			return;
 //		}
-//	}
 //
-//	close(sockfd);
+//		lock_guard lock(entries_mtx);
+//		if((found = entries.find(fid)) == entries.end())
+//		{
+//			log("E: file id disappeared (should never happen): " << fid);
+//			return;
+//		}
+//		found->second.sent = ifs.tellg();
+//	}
 
-	str host = ntoa(ip);
+	log("I: File sent to " << userhost);
 
-	netstream ns;
-	ns.open(host, std::to_string(port));
-
-	if(!ns)
-	{
-		log("ERROR: opening connection to: " << host << ":" << port);
-		return;
-	}
-
-	std::ifstream ifs(e.pathname, std::ios::binary);
-
-	if(!ifs)
-	{
-		log("ERROR: opening file to send: " << e.pathname);
-		return;
-	}
-
-	ns << ifs.rdbuf();// << std::flush;
-//	ns.close();
+//	ns << ifs.rdbuf();
 }
-
-//void FServerIrcBotPlugin::dcc_server(const str& pathname)
-//{
-//	uint16_t portno = 0;
-//
-//	sockaddr_in serv_addr;
-//	sockaddr_in cli_addr;
-//
-//	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-//
-//	if(sockfd < 0)
-//	{
-//		log("ERROR: " << strerror(errno));
-//		return;
-//	}
-//
-//	bzero((char*) &serv_addr, sizeof(serv_addr));
-//
-//	serv_addr.sin_family = AF_INET;
-//	serv_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-//	serv_addr.sin_port = htons(portno);
-//
-//	if(bind(sockfd, (sockaddr*) &serv_addr, sizeof(serv_addr)) < 0)
-//	{
-//		log("ERROR: " << strerror(errno));
-//		return;
-//	}
-//
-//	if(listen(sockfd, 5))
-//	{
-//		log("ERROR: " << strerror(errno));
-//		return;
-//	}
-//
-//	socklen_t clilen = sizeof(cli_addr);
-//
-//	int newsockfd = accept(sockfd, (sockaddr*) &cli_addr, &clilen);
-//
-//	close(sockfd);
-//
-//	if(newsockfd < 0)
-//	{
-//		log("ERROR: " << strerror(errno));
-//		return;
-//	}
-//
-//	int len;
-//	char buf[1024];
-//
-//	std::ifstream ifs(pathname, std::ios::binary);
-//
-//	while(ifs.read(buf, sizeof(buf) && ifs.gcount()))
-//	{
-//		if((len = write(newsockfd, buf, ifs.gcount())) < 0)
-//		{
-//			log("ERROR: " << strerror(errno));
-//			return;
-//		}
-//	}
-//
-//	close(newsockfd);
-//}
-//FServerIrcBotPlugin::uint32 FServerIrcBotPlugin::id = 0;
 
 bool FServerIrcBotPlugin::files(const message& msg)
 {
 	BUG_COMMAND(msg);
-	bot.fc_reply(msg, "This is a test.");
+	if(done.load())
+	{
+		bot.fc_reply_pm_notice(msg, "Declined, server shutting down");
+		return true;
+	}
 	// make zip file
 	// ommo-ebooks-YYYY-MM-DD.txt
 	str data_dir = bot.get("fserver.data.dir", bot.get_data_folder());
@@ -496,71 +486,39 @@ bool FServerIrcBotPlugin::files(const message& msg)
 	if(!have_zip(data_dir, fname))
 		return false;
 
+	log("I: Creating entry for: " << msg.get_userhost());
+	auto fid = next_id();
 	{
-		auto id = next_id();
-		lock_guard lock(entry_mtx);
-		entries[id].pathname = fname + ".zip";
-		q.push_back(id);
-		soss oss;
-		// Request Accepted • List Has Been Placed In The Priority Queue At Position 1 • OmeNServE v2.60 •
-		oss << "Request Accepted • Priority Queue Position";
-		oss << " " << q.size();
-		oss << " • " << bot.nick << "'s " << get_name() << " " << get_version();
-		oss << " •";
-		bot.fc_reply_pm_notice(msg, oss.str());
+		lock_guard lock(entries_mtx);
+		entries[fid].pathname = fname + ".zip";
+		entries[fid].userhost = msg.get_userhost();
+		entries[fid].size = 0;
+		entries[fid].sent = 0;
+		entries[fid].msg = msg;
 	}
 
-	// TODO: move this to queue processing
-
-	decltype(q)::value_type fid = 0;
-
-	{
-		lock_guard lock(entry_mtx);
-		if(q.empty())
-			return true;
-		fid = q.front();
-		q.pop_front();
-	}
-
-	fname += ".zip";
-	bug_var(fname);
-	str zipname = get_filename_from_pathname(fname);
-	bug_var(zipname);
-
-	auto ip = INADDR_LOOPBACK;//htonl(INADDR_LOOPBACK);//dcc_get_my_address();
-	decltype(htonl(0)) port = 0;
-
-//	decltype(stat::st_size) fsize = 0;
-
-	struct stat s;
-	if(stat(fname.c_str(), &s))
-	{
-		log("ERROR: can not stat zip file: " << fname);
-	}
-
-	str address = "127.0.0.1";
-
-	// "DCC SEND %s %u %d %u %d"
-	// , dcc->file
-	// , cc->addr // the 32bit IP number, host byte order
-	// , dcc->port
-	// , dcc->size
-	// , dcc->pasvid
+	log("I: Adding to queue: " << fid);
 
 	soss oss;
-	oss << "DCC Send " << zipname << " (" << address << ")";
-	bot.fc_reply_pm_notice(msg, oss.str());
+	if(!wait_q.push_back(fid))
+	{
+		log("I: Wait queue full: " << fid);
 
-	oss.str("");
-	oss << '\001';
-	oss << "DCC SEND";
-	oss << ' ' << zipname;
-	oss << ' ' << ip; // the 32bit IP number, host byte order
-	oss << ' ' << port;
-	oss << ' ' << s.st_size;
-	oss << ' ' << fid; // sequence id?
-	oss << '\001';
-	bot.fc_reply_pm(msg, oss.str());
+		oss << "Request Denied • Priority Queue is FULL!";
+		oss << " " << wait_q.size();
+		oss << " • " << bot.nick << "'s " << get_name() << " " << get_version();
+		oss << " •";
+	}
+	else
+	{
+		log("I: In wait queue: " << fid);
+		// Request Accepted • List Has Been Placed In The Priority Queue At Position 1 • OmeNServE v2.60 •
+		oss << "Request Accepted • Priority Queue Position";
+		oss << " " << wait_q.size();
+		oss << " • " << bot.nick << "'s " << get_name() << " " << get_version();
+		oss << " •";
+	}
+	bot.fc_reply_pm_notice(msg, oss.str());
 
 	return true;
 }
@@ -568,6 +526,11 @@ bool FServerIrcBotPlugin::files(const message& msg)
 bool FServerIrcBotPlugin::serve(const message& msg)
 {
 	BUG_COMMAND(msg);
+	if(done.load())
+	{
+		bot.fc_reply_pm_notice(msg, "Declined, server shutting down");
+		return true;
+	}
 	bot.fc_reply(msg, "This is a test.");
 	return true;
 }
@@ -584,6 +547,10 @@ str_vec FServerIrcBotPlugin::api(unsigned call, const str_vec& args)
 bool FServerIrcBotPlugin::initialize()
 {
 	bug_func();
+
+	log("I: Starting queue processing");
+	process_queues_fut = std::async(std::launch::async, [&]{process_queues();});
+
 	add
 	(
 		  "files" // trigger
@@ -610,7 +577,76 @@ std::string FServerIrcBotPlugin::get_version() const { return VERSION; }
 
 void FServerIrcBotPlugin::exit()
 {
-//	bug_func();
+	bug_func();
+
+	// stop queue processing
+	log("I: Stopping queue procssing");
+	done.store(true);
+
+	// wait for send queue to complete (with timeout)
+	log("I: Waiting for send queue to complete");
+	if(process_queues_fut.valid())
+	{
+		auto status = process_queues_fut.wait_for(std::chrono::seconds(30));
+		if(status == std::future_status::ready)
+			process_queues_fut.get();
+		else
+		{
+			log("E: time-out for queue processing thread to die");
+		}
+	}
+
+	// notify wait queue of termination
+	log("I: Notifying wait queue of termination");
+	lock_guard lock(entries_mtx);
+
+	uint32 fid;
+	decltype(entries.begin()) found;
+
+	while(!wait_q.empty())
+	{
+		if(wait_q.pop_front(fid))
+		{
+			if((found = entries.find(fid)) != entries.end())
+			{
+				bot.fc_reply_pm_notice(found->second.msg, "DCC removed from queue: server shutting down.");
+				entries.erase(found);
+			}
+		}
+	}
+
+	// wait for transfers to complete
+	log("I: Waiting for transfers to complete");
+
+	st_clk::time_point timeout = st_clk::now() + std::chrono::minutes(5);
+	uint32 count = 1;
+	while(count && st_clk::now() < timeout)
+	{
+		count = 0;
+		uint64 size = 0;
+		uint64 sent = 0;
+		for(auto&& p: entries)
+		{
+			if(!p.second.size || p.second.size == p.second.sent)
+				continue;
+
+			size += p.second.size;
+			sent += p.second.sent;
+			++count;
+		}
+		log("I: Transfers: [" << count << "] " << (sent * 100 / size) << "% complete");
+		std::this_thread::sleep_for(std::chrono::seconds(3));
+	}
+
+	if(count)
+	{
+		log("E: times out waiting for transfers disconnecting them:");
+		for(auto&& p: entries)
+			if(p.second.size && p.second.size != p.second.sent)
+				bot.fc_reply_pm_notice(found->second.msg, "DCC aborting transfer: server shutting down.");
+	}
+
+	entries.clear();
 }
 
 // INTERFACE: IrcBotMonitor
@@ -644,7 +680,7 @@ void FServerIrcBotPlugin::event(const message& msg)
 
 	if(!sgl(siss(dcc) >> s_fid >> s_fsize >> s_port >> s_ip >> std::ws, fname))
 	{
-		log("ERROR: Failed to parse DCC SEND: " << dcc);
+		log("E: Failed to parse DCC SEND: " << dcc);
 		return;
 	}
 
@@ -660,11 +696,11 @@ void FServerIrcBotPlugin::event(const message& msg)
 //		uint64 fsize = std::stol(s_fsize);
 		uint32 port = std::stol(s_port);
 		uint32 ip = std::stol(s_ip);
-		dcc_server(ntohl(ip), port, fid);
+		dcc_send_file_by_id(ntohl(ip), port, fid);
 	}
 	catch(...)
 	{
-		log("ERROR: bad DCC SEND format: " << text);
+		log("E: bad DCC SEND format: " << text);
 		return;
 	}
 
