@@ -58,36 +58,49 @@ public:
 
 private:
 	std::mutex mtx;
-	unique_lock lock;
+//	unique_lock lock;
 	size_type max_size = 0;
 	queue_type data;
 	std::condition_variable cv;
 	bool done = false;
 
+	friend void swap(synchronized_queue& q1, synchronized_queue& q2)
+	{
+		std::swap(q1.max_size, q2.max_size);
+		std::swap(q1.data, q2.data);
+		std::swap(q1.done, q2.done);
+	}
+
 public:
 	synchronized_queue(size_type max_size = 0)
-	: lock(mtx)
-	, max_size(max_size)
+	: max_size(max_size)
 	, done(true)
 	{
-		lock.unlock();
 	}
 
 	synchronized_queue(synchronized_queue&& q)
-	: lock(q.mtx)
-	, max_size(q.max_size)
-	, data(std::move(q.data))
-	, done(q.done)
+	: synchronized_queue()
 	{
-		lock.unlock();
+		lock_guard lock(q.mtx);
+		swap(*this, q);
 	}
+
+	synchronized_queue& operator=(synchronized_queue&& q)
+	{
+		swap(*this, q);
+		return *this;
+	}
+
+	std::mutex& get_mtx() { return mtx; }
+	queue_type& get_data() { return data; }
 
 	synchronized_queue(const synchronized_queue& q) = delete;
 
-//	value_type& front() { lock_guard lock(mtx); return data.front(); }
-//	value_type const& front() const { lock_guard lock(mtx); return data.front(); }
-//	value_type& back() { lock_guard lock(mtx); return data.back(); }
-//	value_type const& back() const { return data.back(); }
+	// unsynchronized
+	value_type& front() { return data.front(); }
+	value_type const& front() const { return data.front(); }
+	value_type& back() { return data.back(); }
+	value_type const& back() const { return data.back(); }
 
 	size_type size() { lock_guard lock(mtx); return data.size(); }
 	size_type capacity() { lock_guard lock(mtx); return max_size; }
@@ -126,7 +139,6 @@ public:
 	bool push_back(ValueType v)
 	{
 		bug_func();
-		bug_var(v);
 		std::unique_lock<std::mutex> lock(mtx);
 		if(max_size && data.size() >= max_size)
 			return false;
@@ -134,6 +146,15 @@ public:
 		lock.unlock();
 		cv.notify_one();
 		return true;
+	}
+
+	bool push_back_the_pop_front_from(synchronized_queue& q)
+	{
+//		bug_func();
+		value_type v;
+		if(!q.pop_front(v))
+			return false;
+		return push_back(std::move(v));
 	}
 
 	void open()
@@ -166,9 +187,7 @@ public:
 		{	return done || !data.empty();});
 		if(data.empty())
 			return false;
-		bug_func();
 		v = std::move(data.front());
-		bug_var(v);
 		data.pop_front();
 		return true;
 	}
@@ -196,54 +215,69 @@ private:
 
 	struct entry
 	{
-		bool error = false;
+		message msg;
 		str pathname;
 		str userhost;
-		message msg;
+		uint32 fid = 0;
 		uint64 size = 0; // 0 -> not started
 		uint64 sent = 0; // size == sent -> done
+		bool error = false;
 		std::future<void> fut;
 
-		entry() = default;
+		friend void swap(entry& a, entry& b)
+		{
+			std::swap(a.msg, b.msg);
+			std::swap(a.pathname, b.pathname);
+			std::swap(a.userhost, b.userhost);
+			std::swap(a.fid, b.fid);
+			std::swap(a.size, b.size);
+			std::swap(a.sent, b.sent);
+			std::swap(a.error, b.error);
+			std::swap(a.fut, b.fut);
+		}
+
+		entry() {};
 
 		entry(entry&& e) noexcept
-		: error(false)
-		, pathname(std::move(e.pathname))
-		, userhost(std::move(e.userhost))
-		, msg(std::move(e.msg))
-		, size(e.size)
-		, sent(e.sent)
-		, fut(std::move(e.fut))
+		: entry()
 		{
+			swap(*this, e);
+		}
+
+		entry& operator=(entry&& e)
+		{
+			swap(*this, e);
+			return *this;
 		}
 	};
 
-	std::mutex entries_mtx;
-	std::map<uint32, entry> entries;
+//	std::mutex entries_mtx;
+//	std::map<uint32, entry> entries;
 
 	uns get_userhost_entries(const str& userhost)
 	{
 		uns count = 0;
 
-		lock_guard lock (entries_mtx);
-		for(auto&& p: entries)
-			if(p.second.userhost == userhost)
+		lock_guard lock (wait_q.get_mtx());
+		for(auto&& p: wait_q.get_data())
+			if(p.userhost == userhost)
 				++count;
 
 		return count;
 	}
 
-	synchronized_queue<uint32> wait_q {10};
-	synchronized_queue<uint32> send_q {2};
-//	std::deque<uint32> q;
+	synchronized_queue<entry> wait_q {10};
+	synchronized_queue<entry> send_q {2};
 
 	std::atomic_bool done {false};
 	std::future<void> process_queues_fut;
 	void process_queues();
-	void erase_send_entry(uint32 fid, entry& e);
+	void end_future(entry& e);
 
 	bool have_zip(const str& data_dir, const str& name); // no .ext
 	bool have_txt(const str& data_dir, const str& name); // no .ext
+
+	void request_file(const message& msg, const str& filename);
 
 	bool files(const message& msg);
 	bool serve(const message& msg);
