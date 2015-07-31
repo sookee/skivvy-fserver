@@ -1,0 +1,12 @@
+/autom4te.cache/
+/aux/
+/build-debug/
+/build-release/
+/aclocal.m4
+/.cproject
+/.project
+/config.h.in
+/configure
+Makefile.in
+/.settings/
+/m4/
