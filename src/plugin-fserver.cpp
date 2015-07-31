@@ -28,11 +28,6 @@ http://www.gnu.org/licenses/gpl-2.0.html
 
 #include <skivvy/plugin-fserver.h>
 
-#include <sookee/types/basic.h>
-#include <sookee/cal.h>
-#include <skivvy/utils.h>
-#include <skivvy/logrep.h>
-
 #include <fstream>
 #include <iomanip>
 
@@ -43,6 +38,12 @@ http://www.gnu.org/licenses/gpl-2.0.html
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+
+#include <sookee/types/basic.h>
+#include <sookee/cal.h>
+#include <sookee/scoper.h>
+#include <skivvy/utils.h>
+#include <skivvy/logrep.h>
 
 namespace skivvy { namespace ircbot {
 
@@ -300,13 +301,13 @@ void FServerIrcBotPlugin::process_queues()
 				if(e->error)
 				{
 					log("I: send error: [" << e->fid << "] " << e->userhost << " " << e->pathname);
-					end_future(*e);
+//					end_future(*e);
 					e = send_q.get_data().erase(e);
 				}
 				else if(e->size && e->size == e->sent)
 				{
 					log("I: file complete: [" << e->fid << "] " << e->userhost << " " << e->pathname);
-					end_future(*e);
+//					end_future(*e);
 					e = send_q.get_data().erase(e);
 				}
 				else
@@ -361,15 +362,12 @@ void FServerIrcBotPlugin::process_queues()
 	}
 }
 
-void FServerIrcBotPlugin::dcc_send_file_by_id(uint32 ip, uint32 port, uint32 fid)
+void FServerIrcBotPlugin::dcc_send_file_by_id(uint32 ip, uint32 port, uint32 fid, uint32 pos)
 {
 	bug_func();
 	bug_var(ip);
 	bug_var(port);
 	bug_var(fid);
-
-	netstream ns;
-	std::ifstream ifs;
 
 	auto found = send_q.get_data().end();
 
@@ -392,23 +390,29 @@ void FServerIrcBotPlugin::dcc_send_file_by_id(uint32 ip, uint32 port, uint32 fid
 			log("E: file id not found: " << fid);
 			return;
 		}
+	}
 
-		userhost = found->userhost;
+	userhost = found->userhost;
 
-		str host = ntoa(ip);
-		bug_var(host);
-		bug_var(found->fid);
-		bug_var(found->pathname);
-		bug_var(found->userhost);
+	str host = ntoa(ip);
+	bug_var(host);
+	bug_var(found->fid);
+	bug_var(found->pathname);
+	bug_var(found->userhost);
 
-		ns.open(host, std::to_string(port));
+	found->fut = std::async(std::launch::async, [found, host, port, pos]
+	{
+//		netstream ns;
+//
+//		ns.open(host, std::to_string(port));
+//
+//		if(!ns)
+//		{
+//			log("E: opening connection to: " << host << ":" << port);
+//			return;
+//		}
 
-		if(!ns)
-		{
-			log("E: opening connection to: " << host << ":" << port);
-			return;
-		}
-
+		std::ifstream ifs;
 		ifs.open(found->pathname, std::ios::binary|std::ios::ate);
 
 		if(!ifs)
@@ -418,41 +422,72 @@ void FServerIrcBotPlugin::dcc_send_file_by_id(uint32 ip, uint32 port, uint32 fid
 		}
 
 		found->size = ifs.tellg();
-		ifs.seekg(0);
+		ifs.seekg(pos);
 		found->sent = ifs.tellg();
 
 		bug_var((bool)ifs);
-		ns << ifs.rdbuf();
-		found->sent = ifs.tellg();
-	}
 
+		hostent* he;
+		if(!(he = gethostbyname(host.c_str())))
+		{
+			log("E: " << std::strerror(errno));
+			return;
+		}
 
-//	char buf[1024];
-//
-//	while(ifs.read(buf, sizeof(buf)) && ifs.gcount())
-//	{
-//		bug_var(ifs.gcount());
-//		if(!ns.write(buf, ifs.gcount()))
-//		{
-//			log("E: writing to client failed: " << fid);
-//			lock_guard lock(entries_mtx);
-//			if((found = entries.find(fid)) != entries.end())
-//				found->second.error = true;
-//			return;
-//		}
-//
-//		lock_guard lock(entries_mtx);
-//		if((found = entries.find(fid)) == entries.end())
-//		{
-//			log("E: file id disappeared (should never happen): " << fid);
-//			return;
-//		}
-//		found->second.sent = ifs.tellg();
-//	}
+		int sd;
+		if((sd = socket(PF_INET, SOCK_STREAM, 0)) == -1)
+		{
+			log("E: " << std::strerror(errno));
+			return;
+		}
+
+		auto sd_closer = make_logged_unistd_closer(sd);
+
+		sockaddr_in sin;
+		memcpy(&sin.sin_addr.s_addr, he->h_addr, he->h_length);
+
+		sin.sin_family = AF_INET;
+		sin.sin_port = htons(port);
+		sin.sin_addr = *((in_addr*) he->h_addr);
+
+		if(connect(sd, (sockaddr*) &sin, sizeof(sin)) < 0)
+		{
+			log("E: " << std::strerror(errno));
+			return;
+		}
+
+		int len;
+		char buf[1024];
+		while(ifs.read(buf, sizeof(buf)), ifs.gcount())
+		{
+			bug_var(ifs.gcount());
+			if((len = send(sd, buf, ifs.gcount(), 0)) < 0)
+			{
+				log("E: writing to client failed: " << std::strerror(errno));
+				found->error = true;
+				return;
+			}
+
+			if(len < ifs.gcount())
+			{
+				log("E: sent less data than expected: " << len << " < " << ifs.gcount());
+				found->error = true;
+			}
+
+			found->sent += len;
+			bug_var(found->sent);
+		}
+
+		if(!ifs.eof())
+		{
+			log("E: reading incomplete: ");
+			found->error = true;
+		}
+
+		found->sent = found->size;
+	});
 
 	log("I: File sent to " << userhost);
-
-//	ns << ifs.rdbuf();
 }
 
 void FServerIrcBotPlugin::request_file(const message& msg, const str& filename)
@@ -488,6 +523,7 @@ void FServerIrcBotPlugin::request_file(const message& msg, const str& filename)
 		oss << " • " << bot.nick << "'s " << get_name() << " " << get_version();
 		oss << " •";
 	}
+	bug_var(oss.str());
 	bot.fc_reply_pm_notice(msg, oss.str());
 }
 
@@ -662,9 +698,11 @@ void FServerIrcBotPlugin::event(const message& msg)
 {
 	if(msg.command != "PRIVMSG")
 		return;
-	BUG_COMMAND(msg);
+	if(msg.get_to() != bot.nick)
+		return;
 	// :Lelly!~lelly@wibble.wobble PRIVMSG oMMo :DCC SEND oMMo-files-2015-07-28.zip 1365602080 6660 229 1
 
+	BUG_COMMAND(msg);
 //	str userhost = msg.get_userhost();
 //	for(const str& s: ignores)
 //		if(userhost.find(s) != str::npos)
@@ -672,9 +710,11 @@ void FServerIrcBotPlugin::event(const message& msg)
 
 	str text = msg.get_trailing();
 	trim(text, "\001");
+	bug_var(text);
 	// DCC SEND oMMo-files-2015-07-28.zip <ip> <port> <fsize> <fid>
+	// DCC RESUME oMMo-files-2015-07-28.zip 0 925173597 1
 	// <fid> = id of offered file
-	if(text.size() < 9)
+	if(text.find("DCC SEND"))
 		return; // malformed
 
 	str dcc = text.substr(9);
@@ -685,6 +725,8 @@ void FServerIrcBotPlugin::event(const message& msg)
 	str s_port;
 	str s_ip;
 	str fname;
+
+	// DCC RESUME "Test #1.zip" 0 925173597 1
 
 	if(!sgl(siss(dcc) >> s_fid >> s_fsize >> s_port >> s_ip >> std::ws, fname))
 	{
@@ -709,6 +751,7 @@ void FServerIrcBotPlugin::event(const message& msg)
 	catch(...)
 	{
 		log("E: bad DCC SEND format: " << text);
+		// 2015-07-30 06:46:14: E: bad DCC SEND format: DCC RESUME "Test #1.zip" 0 925173597 1 [plugin-fserver.cpp] (703)
 		return;
 	}
 

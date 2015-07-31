@@ -1,4 +1,3 @@
-#pragma once
 #ifndef SKIVVY_IRCBOT_FSERVER_H
 #define SKIVVY_IRCBOT_FSERVER_H
 /*
@@ -284,7 +283,7 @@ private:
 
 	str ntoa(uint32 ip) const;
 //	void dcc_server(const str& pathname);
-	void dcc_send_file_by_id(uint32 ip, uint32 port, uint32 fid);
+	void dcc_send_file_by_id(uint32 ip, uint32 port, uint32 fid, uint32 pos = 0);
 
 public:
 	FServerIrcBotPlugin(IrcBot& bot);
