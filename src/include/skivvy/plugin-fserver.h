@@ -107,15 +107,15 @@ public:
 
 	vector_type get_vector()
 	{
-//		bug_func();
+//		bug_fun();
 		std::unique_lock<std::mutex> lock(mtx);
 		return {data.begin(), data.end()};
 	}
 
 	bool find(const value_type& v, size_type& pos)
 	{
-		bug_func();
-		bug_var(v);
+//		bug_fun();
+//		bug_var(v);
 		std::unique_lock<std::mutex> lock(mtx);
 		for(pos = 0; pos < data.size(); ++pos)
 			if(data[pos] == v)
@@ -125,8 +125,8 @@ public:
 
 	bool erase(const value_type& v)
 	{
-		bug_func();
-		bug_var(v);
+//		bug_fun();
+//		bug_var(v);
 		std::unique_lock<std::mutex> lock(mtx);
 		auto found = std::find(data.begin(), data.end(), v);
 		if(found == data.end())
@@ -137,7 +137,7 @@ public:
 
 	bool push_back(ValueType v)
 	{
-		bug_func();
+//		bug_fun();
 		std::unique_lock<std::mutex> lock(mtx);
 		if(max_size && data.size() >= max_size)
 			return false;
@@ -149,7 +149,7 @@ public:
 
 	bool push_back_the_pop_front_from(synchronized_queue& q)
 	{
-//		bug_func();
+//		bug_fun();
 		value_type v;
 		if(!q.pop_front(v))
 			return false;
@@ -158,14 +158,14 @@ public:
 
 	void open()
 	{
-		bug_func();
+//		bug_fun();
 		std::unique_lock<std::mutex> lock(mtx);
 		done = false;
 	}
 
 	void close()
 	{
-		bug_func();
+//		bug_fun();
 		std::unique_lock<std::mutex> lock(mtx);
 		done = true;
 		lock.unlock();
@@ -174,7 +174,7 @@ public:
 
 	bool active()
 	{
-		bug_func();
+//		bug_fun();
 		std::unique_lock<std::mutex> lock(mtx);
 		return !done;
 	}
@@ -182,8 +182,7 @@ public:
 	bool pop_front(ValueType& v)
 	{
 		std::unique_lock<std::mutex> lock(mtx);
-		cv.wait(lock, [this]()
-		{	return done || !data.empty();});
+		cv.wait(lock, [this](){return done || !data.empty();});
 		if(data.empty())
 			return false;
 		v = std::move(data.front());

@@ -263,7 +263,7 @@ str FServerIrcBotPlugin::ntoa(uint32 ip) const
 
 void FServerIrcBotPlugin::end_future(entry& e)
 {
-//	bug_func();
+//	bug_fun();
 //	bug_var(fid);
 //
 //	if(!send_q.erase(fid))
@@ -364,7 +364,7 @@ void FServerIrcBotPlugin::process_queues()
 
 void FServerIrcBotPlugin::dcc_send_file_by_id(uint32 ip, uint32 port, uint32 fid, uint32 pos)
 {
-	bug_func();
+	bug_fun();
 	bug_var(ip);
 	bug_var(port);
 	bug_var(fid);
@@ -456,26 +456,50 @@ void FServerIrcBotPlugin::dcc_send_file_by_id(uint32 ip, uint32 port, uint32 fid
 			return;
 		}
 
+		// working code
+//		int len;
+//		char buf[1024];
+//		while(ifs.read(buf, sizeof(buf)), ifs.gcount())
+//		{
+//			bug_var(ifs.gcount());
+//			if((len = send(sd, buf, ifs.gcount(), 0)) < 0)
+//			{
+//				log("E: writing to client failed: " << std::strerror(errno));
+//				found->error = true;
+//				return;
+//			}
+//
+//			if(len < ifs.gcount())
+//			{
+//				log("E: sent less data than expected: " << len << " < " << ifs.gcount());
+//				found->error = true;
+//			}
+//
+//			found->sent += len;
+//			bug_var(found->sent);
+//		}
+
 		int len;
 		char buf[1024];
 		while(ifs.read(buf, sizeof(buf)), ifs.gcount())
 		{
 			bug_var(ifs.gcount());
-			if((len = send(sd, buf, ifs.gcount(), 0)) < 0)
+			auto to_send = ifs.gcount();
+			while((len = send(sd, buf, to_send, 0)) != to_send)
 			{
-				log("E: writing to client failed: " << std::strerror(errno));
-				found->error = true;
-				return;
-			}
+				if(len < 1)
+				{
+					log("E: writing to client failed: " << std::strerror(errno));
+					found->error = true;
+					return;
+				}
 
-			if(len < ifs.gcount())
-			{
-				log("E: sent less data than expected: " << len << " < " << ifs.gcount());
-				found->error = true;
-			}
+				found->sent += len;
+				bug_var(found->sent);
 
-			found->sent += len;
-			bug_var(found->sent);
+				if(!(to_send -= len))
+					break;
+			}
 		}
 
 		if(!ifs.eof())
@@ -590,7 +614,7 @@ str_vec FServerIrcBotPlugin::api(unsigned call, const str_vec& args)
 
 bool FServerIrcBotPlugin::initialize()
 {
-	bug_func();
+	bug_fun();
 
 	log("I: Starting queue processing");
 	process_queues_fut = std::async(std::launch::async, [&]{process_queues();});
@@ -621,7 +645,7 @@ std::string FServerIrcBotPlugin::get_version() const { return VERSION; }
 
 void FServerIrcBotPlugin::exit()
 {
-	bug_func();
+	bug_fun();
 
 	// stop queue processing
 	log("I: Stopping queue procssing");

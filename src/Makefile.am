@@ -41,6 +41,8 @@ AM_CXXFLAGS = $(GEN_FLAGS) $(DEF_FLAGS) -std=gnu++11
 # -Wl,-E is required for programs that load plugin's
 PLUGIN_FLAGS = -Wl,-E
 
+noinst_PROGRAMS = test
+
 plugin_include_HEADERS = \
 	$(srcdir)/include/skivvy/plugin-fserver.h
 	
@@ -51,7 +53,12 @@ plugin_library_LTLIBRARIES =  \
 # IrcBot plugins
 skivvy_plugin_fserver_la_SOURCES = plugin-fserver.cpp
 skivvy_plugin_fserver_la_LDFLAGS = -module -avoid-version $(PLUGIN_FLAGS)
-skivvy_plugin_fserver_la_LIBADD = $(SOOKEE_LIBS) $(SKIVVY_LIBS) $(LIBZIP_LIBS) -L.libs
+skivvy_plugin_fserver_la_LIBADD = $(SOOKEE_LIBS) $(SKIVVY_LIBS) $(LIBZIP_LIBS) $(OPENSSL_LIBS) -L.libs
+
+# testing
+
+test_SOURCES = test.cpp
+test_LDADD = $(SOOKEE_LIBS) $(SKIVVY_LIBS) $(LIBZIP_LIBS) $(OPENSSL_LIBS)
 
 plugin_manuals_DATA = $(top_srcdir)/docs/fserver-manual.text
 
